@@ -29,13 +29,31 @@ imdb::~imdb() {
 	releaseFileMap(movieInfo);
 }
 
+
 bool imdb::getCredits(const string& player, vector<film>& films) const { 
 	int n_actors = ((int *) this->actorFile)[0];
 
-	for (int i = 0; i < n_actors; i++) 
+	for (int i = 1; i < n_actors; i++) 
 	{
+
 		int act_ix = ((int *) this->actorFile)[i];
-		cout << act_ix << endl;
+		int ix = 0;
+		int jx = 0;
+		while(((char *) this->actorFile)[act_ix + jx])
+		{
+			if (((char *) this->actorFile)[act_ix + jx] != player[ix])
+				break;
+			jx++;
+			ix++;
+			//printf("%c", ((char *) this->actorFile)[act_ix++]);	
+		}
+		if ((ix == jx) && ix > 0)
+		{
+			while(((char *) this->actorFile)[act_ix])
+			{
+				printf("%c", ((char *) this->actorFile)[act_ix++]);	
+			}
+		}
 	}
 
 	return 0;
