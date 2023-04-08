@@ -30,11 +30,19 @@ imdb::~imdb() {
 }
 
 bool imdb::getCredits(const string& player, vector<film>& films) const { 
-  
+	int n_actors = ((int *) this->actorFile)[0];
+
+	for (int i = 0; i < n_actors; i++) 
+	{
+		int act_ix = ((int *) this->actorFile)[i];
+		cout << act_ix << endl;
+	}
+
+	return 0;
 }
 
 bool imdb::getCast(const film& movie, vector<string>& players) const { 
-
+	return 0;
 }
 
 const void *imdb::acquireFileMap(const string& fileName, struct fileInfo& info) {
