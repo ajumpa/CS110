@@ -30,31 +30,35 @@ imdb::~imdb() {
 }
 
 
+/*
+	Binary search for actor name
+	Get moviedata offset bytes from end of actor record
+	populate film vecotr with film data from moviedata
+*/
 bool imdb::getCredits(const string& player, vector<film>& films) const { 
-	int n_actors = ((int *) this->actorFile)[0];
+  int lx = 1;
+	int mx = 0;
+	int hx = ((int *) this->actorFile)[0];
 
+	vector<int> a_ix;
+
+	int ix = ((int *) this->actorFile)[999];
+	char* name = &((char *) this->actorFile)[ix];
+	printf("%s\n", name);
+
+
+	/**
+  while (lx != hx)
+  {
+		mx = lx + (hx-lx) / 2;
+		int ix = ((int *) this->actorFile)[mx];
+  }
+  
 	for (int i = 1; i < n_actors; i++) 
 	{
-
 		int act_ix = ((int *) this->actorFile)[i];
-		int ix = 0;
-		int jx = 0;
-		while(((char *) this->actorFile)[act_ix + jx])
-		{
-			if (((char *) this->actorFile)[act_ix + jx] != player[ix])
-				break;
-			jx++;
-			ix++;
-			//printf("%c", ((char *) this->actorFile)[act_ix++]);	
-		}
-		if ((ix == jx) && ix > 0)
-		{
-			while(((char *) this->actorFile)[act_ix])
-			{
-				printf("%c", ((char *) this->actorFile)[act_ix++]);	
-			}
-		}
 	}
+   **/
 
 	return 0;
 }
