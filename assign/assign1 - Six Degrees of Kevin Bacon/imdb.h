@@ -94,6 +94,8 @@ class imdb {
   static const void *acquireFileMap(const std::string& fileName, struct fileInfo& info);
   static void releaseFileMap(struct fileInfo& info);
 
+  const bool compare_names(int act_ix, const std::string& name);
+
   imdb(const imdb& original) = delete;
   imdb& operator=(const imdb& rhs) = delete;
   imdb& operator=(const imdb& rhs) const = delete;

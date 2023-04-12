@@ -36,35 +36,31 @@ imdb::~imdb() {
 	populate film vecotr with film data from moviedata
 */
 bool imdb::getCredits(const string& player, vector<film>& films) const { 
-  int lx = 1;
-	int mx = 0;
-	int hx = ((int *) this->actorFile)[0];
+  const int *lx = (const int *) actorFile + 1;
+	const int *hx = lx + ((const int *) this->actorFile)[0];
+	//int act_ix = ((int *) this->actorFile)[mx];
 
-	vector<int> a_ix;
-
-	int ix = ((int *) this->actorFile)[999];
-	char* name = &((char *) this->actorFile)[ix];
-	printf("%s\n", name);
-
-
-	/**
-  while (lx != hx)
-  {
-		mx = lx + (hx-lx) / 2;
-		int ix = ((int *) this->actorFile)[mx];
-  }
-  
-	for (int i = 1; i < n_actors; i++) 
-	{
-		int act_ix = ((int *) this->actorFile)[i];
-	}
-   **/
+	const int *pos = lower_bound(lx, hx, player, [this] (int act_ix, const std::string& player) {
+		return compare_names(act_ix, player);
+	});
 
 	return 0;
 }
 
 bool imdb::getCast(const film& movie, vector<string>& players) const { 
 	return 0;
+}
+
+/**
+ * Anonymous helper function for STL lower_bounds.
+ * Return true if actor record name at offset act_ix is lexigraphically
+ * less than the searched name.
+ * */ 
+
+const bool imdb::compare_names(int act_ix, const std::string& name)
+{
+	int cmp = strcmp(&((char *) this->actorFile)[act_ix], name.c_str());
+	return cmp < 0 ? true : false;
 }
 
 const void *imdb::acquireFileMap(const string& fileName, struct fileInfo& info) {
