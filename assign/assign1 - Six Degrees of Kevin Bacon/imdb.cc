@@ -29,6 +29,16 @@ imdb::~imdb() {
 	releaseFileMap(movieInfo);
 }
 
+/**
+ * Anonymous helper function for STL lower_bounds.
+ * Return true if actor record name at offset act_ix is lexigraphically
+ * less than the searched name.
+ * */ 
+const bool imdb::compare_names(int act_ix, const std::string& player)
+{
+	int cmp = strcmp(&((char *) this->actorFile)[act_ix], player.c_str());
+	return cmp < 0 ? true : false;
+}
 
 /*
 	Binary search for actor name
@@ -36,31 +46,30 @@ imdb::~imdb() {
 	populate film vecotr with film data from moviedata
 */
 bool imdb::getCredits(const string& player, vector<film>& films) const { 
-  const int *lx = (const int *) actorFile + 1;
-	const int *hx = lx + ((const int *) this->actorFile)[0];
-	//int act_ix = ((int *) this->actorFile)[mx];
-
-	const int *pos = lower_bound(lx, hx, player, [this] (int act_ix, const std::string& player) {
-		return compare_names(act_ix, player);
+  int *lx = (int *) actorFile + 1;
+	int *hx = lx + ((int *) this->actorFile)[0];
+	
+	int *pos = lower_bound(lx, hx, player, [this] (int act_ix, const std::string& player) {
+		int cmp = strcmp(&((char *) this->actorFile)[act_ix], player.c_str());
+		return cmp < 0 ? true : false;
 	});
 
+	const char *name = &((char *) this->actorFile)[*pos];
+
+	if (strcmp(player.c_str(), name) != 0)
+		return 0;
+	
+	printf("Found %s at offset %d\n", name, *pos);
+
+	int *name_len = (int *) strlen(name);
+	int *c = (int *) ( (*name_len % 2) ? (int *) 2 : (int *)1);
+	short num_movies = ((int *) this->actorFile)[*pos + *name_len + *c];
+	printf("Number of movies %d\n", num_movies);
 	return 0;
 }
 
 bool imdb::getCast(const film& movie, vector<string>& players) const { 
 	return 0;
-}
-
-/**
- * Anonymous helper function for STL lower_bounds.
- * Return true if actor record name at offset act_ix is lexigraphically
- * less than the searched name.
- * */ 
-
-const bool imdb::compare_names(int act_ix, const std::string& name)
-{
-	int cmp = strcmp(&((char *) this->actorFile)[act_ix], name.c_str());
-	return cmp < 0 ? true : false;
 }
 
 const void *imdb::acquireFileMap(const string& fileName, struct fileInfo& info) {
