@@ -29,27 +29,16 @@ imdb::~imdb() {
 	releaseFileMap(movieInfo);
 }
 
-/**
- * Anonymous helper function for STL lower_bounds.
- * Return true if actor record name at offset act_ix is lexigraphically
- * less than the searched name.
- * */ 
-const bool imdb::compare_names(int act_ix, const std::string& player)
-{
-	int cmp = strcmp(&((char *) this->actorFile)[act_ix], player.c_str());
-	return cmp < 0 ? true : false;
-}
-
 /*
 	Binary search for actor name
 	Get moviedata offset bytes from end of actor record
 	populate film vecotr with film data from moviedata
 */
 bool imdb::getCredits(const string& player, vector<film>& films) const { 
-  int *lx = (int *) actorFile + 1;
-	int *hx = lx + ((int *) this->actorFile)[0];
+  const int *lx = (int *) actorFile + 1;
+	const int *hx = lx + ((int *) this->actorFile)[0];
 	
-	int *pos = lower_bound(lx, hx, player, [this] (int act_ix, const std::string& player) {
+	const int *pos = lower_bound(lx, hx, player, [this] (int act_ix, const std::string& player) {
 		int cmp = strcmp(&((char *) this->actorFile)[act_ix], player.c_str());
 		return cmp < 0 ? true : false;
 	});
@@ -61,10 +50,20 @@ bool imdb::getCredits(const string& player, vector<film>& films) const {
 	
 	printf("Found %s at offset %d\n", name, *pos);
 
-	int *name_len = (int *) strlen(name);
-	int *c = (int *) ( (*name_len % 2) ? (int *) 2 : (int *)1);
-	short num_movies = ((int *) this->actorFile)[*pos + *name_len + *c];
-	printf("Number of movies %d\n", num_movies);
+	int name_len = strlen(name);
+	int c = ( (name_len % 2) ?  1 : 2);
+	int ix = *pos+name_len+c;
+	short num_movies = (short) ((unsigned char *) this->actorFile)[ix];
+
+	printf("Number of movies %hi\n", num_movies);
+
+	ix += 2;
+
+	for (int i = 0; i <= (int) num_movies; i++)
+	{
+		int movie_ix = (int) ((unsigned char *) this->actorFile)[ix+i];
+		printf("%d\n", movie_ix);
+	}
 	return 0;
 }
 
