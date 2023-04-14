@@ -61,8 +61,7 @@ bool imdb::getCredits(const string& player, vector<film>& films) const {
 
 	for (int i = 0; i <= (int) num_movies; i++)
 	{
-		int *movie_ix = (int *) ( (int *) this->actorFile)[ix+i*4];
-		printf("%d \n", *movie_ix);
+		printf("%d \n",  *(int * ) &((int *) this->actorFile)[ix+i*4] );
 
 		/**
 		 *  
