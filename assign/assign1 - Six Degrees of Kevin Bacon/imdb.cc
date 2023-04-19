@@ -46,11 +46,11 @@ bool imdb::getCredits(const string& player, vector<film>& films) const {
 	int ix = *pos + strlen(name) + ((strlen(name) % 2) ?  1 : 2);
 
 	short num_movies = (short) ((char *) this->actorFile)[ix];
-
+	ix += 2;
 	ix += ix%4;
 
 	int *offset_list = (int *) ((char *) actorFile + ix);
-	for (int i = 1; i <= (int) num_movies; i++)
+	for (int i = 0; i < (int) num_movies; i++)
 	{
 		int movie_offset = *(offset_list + i);
 		char *title = ((char *) movieFile) + movie_offset;
@@ -59,7 +59,6 @@ bool imdb::getCredits(const string& player, vector<film>& films) const {
 		film new_film = film {title, year};
 		films.push_back(new_film);
 	}
-
 	return 1;
 }
 
@@ -78,22 +77,18 @@ bool imdb::getCast(const film& movie, vector<string>& players) const {
 	if (strcmp(title, movie_name) != 0)
 		return 0;
 
-	printf("Movie : %s\n", movie_name);
-
 	int ix = *pos + (strlen(movie_name)+1) + 1 + (((strlen(movie_name) + 2) % 2) ?  1 : 0);
-
 	short num_actors = (short) ((char *) this->movieFile)[ix];
-
-	printf("%d actors :\n", num_actors);
-	
+	ix += 2;
 	ix += ix%4;
 
 	int *offset_list = (int *) ((char *) movieFile + ix);
-	for (int i = 1; i <= (int) num_actors; i++)
+	for (int i = 0; i < (int) num_actors; i++)
 	{
 		int offset = *(offset_list + i);
 		char *name = ((char *) actorFile) + offset;
-		printf("\t%d. %s\n", i, name);
+		string str_name = std::string(name);
+		players.push_back(str_name);
 	}
 
 	return 1;
