@@ -65,12 +65,23 @@ static void search(const imdb& db, const string& a1, const string& a2) {
 		costars = a2_immediate_costars;
 	}
 
-	list<string> Q;
-	Q.push_back(src);
+	set <string, bool> v_actors;
+	set <film, bool> v_films;
+
+	list<string> Q_actors;
 	map<string, set<film>>::const_iterator curr;
-	while (!Q.empty()) {
-		const string& costar = curr->first;
+
+	for(curr = costars.begin() ; curr != costars.end(); curr++)
+	{
+		Q_actors.push_back(curr->first);
 	}
+
+	while (!Q_actors.empty()) {
+		// pop string from Q
+		// get Q's costars
+		// for every costar actor and film
+	}
+
 }
 
 int main(int argc, char *argv[]) {
