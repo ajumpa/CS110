@@ -14,8 +14,9 @@ using namespace std;
 static const int kWrongArgumentCount = 1;
 static const int kDatabaseNotFound = 2;
 
-int mapCostars(const string &player, map<string, set<film>> &costars, 
-											 const vector<film>& credits, const imdb& db) {
+int mapCostars(const string &player, map<string, film> &costars_films,
+											 const vector<film>& credits, const imdb& db)
+{
 	int n_costars = 0;
 	for (int i = 0; i < (int) credits.size(); i++) {
 		const film& movie = credits[i];
@@ -25,14 +26,16 @@ int mapCostars(const string &player, map<string, set<film>> &costars,
 			const string& costar = cast[j];
 			if (costar != player) {
 				n_costars++;
-				costars[costar].insert(movie);
+				if(!costars_films.count(costar))
+					costars_films.insert({costar, movie});
 			}
 		}
 	}
 	return n_costars;
 }
 
-static void search(const imdb& db, const string& a1, const string& a2) {
+static void search(const imdb& db, const string& a1, const string& a2)
+{
 	vector<film> a1_films;
 	if (!db.getCredits(a1, a1_films) || a1_films.size() == 0) {
 		cout << "We're sorry, but " << a1
@@ -47,41 +50,50 @@ static void search(const imdb& db, const string& a1, const string& a2) {
 		return;
 	}
 
-	map<string, set<film>> a1_immediate_costars;
-	map<string, set<film>> a2_immediate_costars;
-	map<string, set<film>> costars;
+	map<string, film> a1_immediate_costars;
+	map<string, film> a2_immediate_costars;
+	map<string, film> costars_films;
 	string src;
 	string dst;
 
-	if ( mapCostars(a1, a1_immediate_costars, a1_films, db) 
+	if (mapCostars(a1, a1_immediate_costars, a1_films, db) 
 			<= mapCostars(a2, a2_immediate_costars, a2_films, db))
 	{
 		src = a1, dst = a2;
-		costars = a1_immediate_costars;
+		costars_films = a1_immediate_costars;
 	} 
 	else 
 	{
 		src = a2, dst = a1;
-		costars = a2_immediate_costars;
+		costars_films = a2_immediate_costars;
 	}
 
-	set <string, bool> v_actors;
-	set <film, bool> v_films;
+	set <string> v_actors;
+	set <film> v_films;
 
-	list<string> Q_actors;
-	map<string, set<film>>::const_iterator curr;
+	while (!costars_films.empty()) {
+		map<string, film>::iterator tuple = costars_films.begin();
+		string actor = tuple->first;
+		film credit  = tuple->second;
+		costars_films.erase(tuple);
 
-	for(curr = costars.begin() ; curr != costars.end(); curr++)
-	{
-		Q_actors.push_back(curr->first);
+		if(!v_actors.count(actor) && !v_films.count(credit) && actor != src)
+		{
+			v_actors.insert(actor);
+			v_films.insert(credit);
+
+			//printf("%s played in %s\n", actor.c_str(), credit.title.c_str());
+			vector<film> actor_credits;
+
+			db.getCredits(actor, actor_credits);
+			mapCostars(actor, costars_films, actor_credits, db);
+
+		} else if (actor == dst)
+		{
+			cout << "Found " << actor << endl;
+		} else {
+		}
 	}
-
-	while (!Q_actors.empty()) {
-		// pop string from Q
-		// get Q's costars
-		// for every costar actor and film
-	}
-
 }
 
 int main(int argc, char *argv[]) {
