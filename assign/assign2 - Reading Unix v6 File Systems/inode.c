@@ -7,6 +7,8 @@
 
 #define INDIR_ADDR 7
 #define INODES_PER_BLOCK 16
+#define NUM_BLOCKS_PER_BLOCK 256
+
 
 /**
  * Fetches the specified inode from the filesystem. 
@@ -18,9 +20,7 @@ int inode_iget(struct unixfilesystem *fs, int inumber, struct inode *inp) {
   int node_offset = (inumber-1)%INODES_PER_BLOCK;
 
   if (diskimg_readsector(fs->dfd, INODE_START_SECTOR + sector_offset, i_nodes) < 0)
-  {
     return -1;
-  }
   
   memcpy(inp, &i_nodes[node_offset], sizeof(struct inode) );
 
@@ -39,20 +39,45 @@ int inode_indexlookup(struct unixfilesystem *fs, struct inode *inp, int blockNum
   int size = inode_getsize(inp);
   int large = (inp->i_mode & ILARG);
   
-
-  // Direct addressing
+  // MORE THAN LIKELY OFF BY ONE ERRORS IN INDIRECT AND DOUBLY INDIRECT SECTIONS
   if ( !(large) )
   {
-    sect_num = inp->i_addr[blockNum];
+    return inp->i_addr[blockNum];
   }
-
-  else
+  else if ( blockNum <= INDIR_ADDR*NUM_BLOCKS_PER_BLOCK )
   {
+    int direct_block_offset = blockNum/NUM_BLOCKS_PER_BLOCK;
+    int indirect_block_offset = blockNum%NUM_BLOCKS_PER_BLOCK;
+    int direct_block = inp->i_addr[direct_block_offset];
+    uint16_t indirect_blocks[NUM_BLOCKS_PER_BLOCK];
 
+    if (diskimg_readsector(fs->dfd, direct_block, &indirect_blocks) < 0)
+      return -1;
+    return indirect_blocks[indirect_block_offset];
+  }
+  else if ( blockNum > INDIR_ADDR*NUM_BLOCKS_PER_BLOCK )
+  {
+    int direct_block_offset = INDIR_ADDR;
+    blockNum -= INDIR_ADDR*NUM_BLOCKS_PER_BLOCK;
+    int indirect_block_offset = blockNum/NUM_BLOCKS_PER_BLOCK;
+    int double_indirect_block_offset = blockNum%NUM_BLOCKS_PER_BLOCK;
+    
+    uint16_t indirect_blocks[NUM_BLOCKS_PER_BLOCK];
+    uint16_t double_indirect_blocks[NUM_BLOCKS_PER_BLOCK];
+
+    int direct_block = inp->i_addr[direct_block_offset];
+    if (diskimg_readsector(fs->dfd, direct_block, &indirect_blocks) < 0)
+      return -1;
+    
+    uint16_t next_block = indirect_blocks[indirect_block_offset];
+
+    if (diskimg_readsector(fs->dfd, next_block, &double_indirect_blocks) < 0)
+      return -1;
+
+    return double_indirect_blocks[double_indirect_block_offset];
   }
 
-
-  return sect_num;
+  return 0;
 }
 
 /**
