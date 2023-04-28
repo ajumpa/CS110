@@ -34,7 +34,6 @@ int inode_iget(struct unixfilesystem *fs, int inumber, struct inode *inp) {
  * Returns the disk block number on success, -1 on error.  
  */
 int inode_indexlookup(struct unixfilesystem *fs, struct inode *inp, int blockNum) {
-  
   int sect_num = 0;
   int size = inode_getsize(inp);
   int large = (inp->i_mode & ILARG);
