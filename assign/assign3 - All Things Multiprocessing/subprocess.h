@@ -53,6 +53,7 @@ int main(int argc, char *argv[]) {
 
 #pragma once
 #include <unistd.h> // for pid_t
+#include <fcntl.h>
 #include "subprocess-exception.h"
 
 /**

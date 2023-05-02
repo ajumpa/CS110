@@ -65,8 +65,8 @@ static void waitForChildProcess(pid_t pid) {
  */
 const string kSortExecutable = "/usr/bin/sort";
 int main(int argc, char *argv[]) {
-	// true, false
 	try {
+    // true, true
 		char *argv[] = {const_cast<char *>(kSortExecutable.c_str()), NULL};
 		subprocess_t child = subprocess(argv, true, true);
 		publishWordsToChild(child.supplyfd);
