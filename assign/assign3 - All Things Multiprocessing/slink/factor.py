@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import sys, os, signal, math, time
 
 # This line is equivalent to the C syscall: prctl(PR_SET_PDEATHSIG, SIGKILL);
@@ -30,10 +30,10 @@ self_halting = len(sys.argv) > 1 and sys.argv[1] == '--self-halting'
 pid = os.getpid()
 while True:
     if self_halting: os.kill(pid, signal.SIGSTOP)
-    try: num = int(raw_input()) 
+    try: num = int(raw_input())
     except EOFError: break;
     start = time.time()
     response = factorization(num)
     stop = time.time()
     print '%s [pid: %d, time: %g seconds]' % (response, pid, stop - start)
-    
+
