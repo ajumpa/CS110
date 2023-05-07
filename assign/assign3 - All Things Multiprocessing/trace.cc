@@ -28,49 +28,70 @@ using namespace std;
 static string process_string(pid_t pid, unsigned long addr)
 {
   size_t bytes_read = 0;
-  while( !(bytes_read%sizeof(long)) )
+  while( !( bytes_read%(sizeof(long))) )
   {
     long ret = ptrace(PTRACE_PEEKDATA, pid, addr + bytes_read);
     char *ret_chars = (char *) &ret; 
     
     size_t i = 0;
-    while(ret_chars[i] != '\0' && i < sizeof(long))
+    while(i < sizeof(long))
     {
+      if (ret_chars[i] == '\0')
+        return "";
+
       cout << ret_chars[i];
       i++;
     }
-    
     bytes_read += i;
   }
-
   return "";
 }
 
 static const int REGS[6] = {RDI, RSI, RDX, R10, R8, R9};
 string print_syscall_args(systemCallSignature signature, pid_t pid)
 {
-  for (int i=0; i < (int) signature.size(); i++)
+  int n =  (int) signature.size();
+  for (int i=0; i < n; i++)
   {
     long val = ptrace(PTRACE_PEEKUSER, pid, REGS[i] * sizeof(long));
     switch (signature[i]){
       case SYSCALL_INTEGER:
-        cout << dec << val;
+        cout << dec << (int) val;
         break;
       case SYSCALL_STRING:
         cout << '"' << process_string(pid, val) << '"';
         break;
       case SYSCALL_POINTER:
-        cout << "0x" << hex << val;
+        if (val != 0)
+          cout << "0x" << hex << val;
+        else
+          cout << "NULL";
         break;
       case SYSCALL_UNKNOWN_TYPE:
         cout << "<UNKOWN SIGNATURE>";
         break;
     }
-    cout << ", ";
+    cout << (i == n-1 ?  "" : ", ");
   }
   return "";
 }
 
+string full_retval(long ret, bool addr, map<int, std::string>& errorConstants)
+{
+  
+  if (ret >= 0)
+    if (addr)
+      cout << "0x" << hex << ret;
+    else
+      cout << dec << (int) ret;
+  else
+    cout << "-1 " << errorConstants[abs(ret)] << " (" << strerror(abs(ret)) << ")";
+  
+  return "";
+}
+
+#define BRK "brk"
+#define MMAP "mmap"
 int main(int argc, char *argv[]) {
   bool simple = false, rebuild = false;
   int numFlags = processCommandLineFlags(simple, rebuild, argv);
@@ -82,6 +103,9 @@ int main(int argc, char *argv[]) {
   map<int, string> systemCallNumbers;
   map<string, int> systemCallNames;
   map<string, systemCallSignature> systemCallSignatures;
+  map<int, string> errorStrings;
+
+  compileSystemCallErrorStrings(errorStrings);
   compileSystemCallData(systemCallNumbers,systemCallNames, systemCallSignatures, rebuild);
   
   pid_t pid = fork();
@@ -97,9 +121,11 @@ int main(int argc, char *argv[]) {
   assert(WIFSTOPPED(status));
   ptrace(PTRACE_SETOPTIONS, pid, 0, PTRACE_O_TRACESYSGOOD);
   
-  int break_poll = 0;
-  while (!break_poll)
+  bool poll = true;
+  while (poll)
   {
+
+    bool addr_retval = false;
     while (true) {
       ptrace(PTRACE_SYSCALL, pid, 0, 0);
       waitpid(pid, &status, 0);
@@ -112,6 +138,10 @@ int main(int argc, char *argv[]) {
           cout << "syscall(" << syscall << ") = " << flush;
         else
           cout << syscall_name << "(" << print_syscall_args(signature, pid) << ") = " << flush;
+        
+        if ( !strcmp(syscall_name.c_str(), MMAP) || !strcmp(syscall_name.c_str(), BRK))
+          addr_retval = true;
+
         break;
       }
     }
@@ -121,7 +151,10 @@ int main(int argc, char *argv[]) {
       waitpid(pid, &status, 0);
       if (WIFSTOPPED(status) && (WSTOPSIG(status) == (SIGTRAP | 0x80))) {
         long retval = ptrace(PTRACE_PEEKUSER, pid, RAX * sizeof(long));
-        cout << retval << endl;
+        if (simple)
+          cout << retval << endl;
+        else
+          cout << full_retval(retval, addr_retval, errorStrings) << endl;
         break;
       }
 
@@ -129,7 +162,7 @@ int main(int argc, char *argv[]) {
       {
         cout << "<no return>" << flush << endl;
         kill(pid, SIGKILL);
-        break_poll = 1;
+        poll = false;
         break;
       }
     }
