@@ -56,7 +56,7 @@ subprocess_t subprocess(char *argv[], bool supplyChildInput, bool ingestChildOut
       dup2(pipe_2[1], STDOUT_FILENO);
     else
       close(pipe_2[1]);
-    
+     
     execvp( argv[0], argv );
     throw SubprocessException("Execution passed execvp()");
   }
