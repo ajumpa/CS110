@@ -5,12 +5,17 @@
 #include <iostream>
 #include <cstdlib>
 #include <vector>
+#include <map>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <sched.h>
 #include "subprocess.h"
 
+#include <ext/stdio_filebuf.h>
+#include <fstream>
+
 using namespace std;
+using namespace __gnu_cxx; // __gnu_cxx::stdio_filebuf -> stdio_filebuf
 
 struct worker {
 	worker() {}
@@ -19,47 +24,68 @@ struct worker {
 	bool available;
 };
 
+
 static const size_t kNumCPUs = sysconf(_SC_NPROCESSORS_ONLN);
 static vector<worker> workers(kNumCPUs);
 static size_t numWorkersAvailable = 0;
 
+static map<pid_t, int> pid_workers_ix;
+static const string kExecutable = "./factor.py";
+static const string kArg = "--self-halting";
+
 static void markWorkersAsAvailable(int sig) {
   while (true)
-  {
-    pid_t pid = waitpid(-1, NULL, WNOHANG);
+  { 
+    pid_t pid = waitpid(-1, NULL, WUNTRACED);
     if (pid <= 0) break;
-    printf("%d ready for work!\n", pid);
+    workers[pid_workers_ix[pid]].available = true;
+    numWorkersAvailable++;
+    printf("%d ready for work!\n", pid_workers_ix[pid]);
+    break;
   }
 }
 
-const string kExecutable = "./factor.py";
-const string kArg = "--self-halting";
 static void spawnAllWorkers() {
-  cpu_set_t set;
-  CPU_ZERO(&set);
+  static cpu_set_t cpu_set;
+  CPU_ZERO(&cpu_set);
   char *argv[] = {const_cast<char *>(kExecutable.c_str()), const_cast<char *>(kArg.c_str())};
   for (size_t i = 0; i < kNumCPUs; i++)
   {
     worker w = worker(argv);
     workers.push_back(w);
+    pid_workers_ix.insert({w.sp.pid, i});
+    CPU_SET(i,&cpu_set);
 
-    CPU_SET(i,&set);
-    if (sched_setaffinity(w.sp.pid, sizeof(set), &set) < 0)
+    if (sched_setaffinity(w.sp.pid, sizeof(cpu_set), &cpu_set) < 0)
       perror("sched_setaffinity");
-
-    printf("Worker %d is set to run on CPU %ld\n", w.sp.pid, i);
+    
+    printf("Worker %d is set to run on CPU %ld\n", w.sp.pid, pid_workers_ix[w.sp.pid]);
   }
 }
 
 static size_t getAvailableWorker() {
-  printf("There are %ld process online for this machine\n", kNumCPUs);
+  sigset_t mask;
+  sigemptyset(&mask);
+  while(numWorkersAvailable < 1)
+    sigsuspend(&mask);
+  
   for (size_t i = 0; i < kNumCPUs; i++)
   {
     if (workers[i].available)
+    {
+      printf("WORKER IS %d\n", workers[i].sp.pid);
+      numWorkersAvailable--;
       return i;
+    }
   }
 
   return -1;
+}
+
+static void publishWordsToChild(int to, string number) {
+	stdio_filebuf<char> outbuf(to, std::ios::out);
+	ostream os(&outbuf);
+	os << number + "\n" << endl;
 }
 
 static void broadcastNumbersToWorkers() {
@@ -70,11 +96,21 @@ static void broadcastNumbersToWorkers() {
 		size_t endpos;
 		long long num = stoll(line, &endpos);
 		if (endpos != line.size()) break;
+    size_t i = getAvailableWorker();
+    worker w = workers[i];
+    printf("Got worker %ld, Its pid is %ld. Can we write to its stdin? %d\n", i, w.sp.pid, w.sp.supplyfd);
+    publishWordsToChild(w.sp.supplyfd, line);
+    kill (w.sp.pid, SIGCONT);
 	}
 }
 
 static void waitForAllWorkers() {
-
+  printf("Waiting for all workers\n");
+  for (size_t i = 0; i < kNumCPUs; i++)
+  {
+    while (true)
+      pid_t pid = waitpid(-1, NULL, WUNTRACED|WNOHANG);
+  }
 }
 
 static void closeAllWorkers() {
