@@ -36,11 +36,11 @@ static const string kArg = "--self-halting";
 static void markWorkersAsAvailable(int sig) {
   while (true)
   { 
-    pid_t pid = waitpid(-1, NULL, WUNTRACED);
-    if (pid <= 0) break;
+    int status;
+    pid_t pid = waitpid(-1, &status, WUNTRACED);
+    if (pid <= 0 || WIFCONTINUED(status)) break;
     workers[pid_workers_ix[pid]].available = true;
     numWorkersAvailable++;
-    printf("%d ready for work!\n", pid_workers_ix[pid]);
     break;
   }
 }
@@ -52,14 +52,14 @@ static void spawnAllWorkers() {
   for (size_t i = 0; i < kNumCPUs; i++)
   {
     worker w = worker(argv);
-    workers.push_back(w);
+    workers[i] = w;
     pid_workers_ix.insert({w.sp.pid, i});
     CPU_SET(i,&cpu_set);
 
     if (sched_setaffinity(w.sp.pid, sizeof(cpu_set), &cpu_set) < 0)
       perror("sched_setaffinity");
-    
-    printf("Worker %d is set to run on CPU %ld\n", w.sp.pid, pid_workers_ix[w.sp.pid]);
+
+    printf("Worker %d is set to run on CPU %ld\n", workers[i].sp.pid, pid_workers_ix[w.sp.pid]);
   }
 }
 
@@ -73,8 +73,8 @@ static size_t getAvailableWorker() {
   {
     if (workers[i].available)
     {
-      printf("WORKER IS %d\n", workers[i].sp.pid);
       numWorkersAvailable--;
+      workers[i].available = false;
       return i;
     }
   }
@@ -98,7 +98,7 @@ static void broadcastNumbersToWorkers() {
 		if (endpos != line.size()) break;
     size_t i = getAvailableWorker();
     worker w = workers[i];
-    printf("Got worker %ld, Its pid is %ld. Can we write to its stdin? %d\n", i, w.sp.pid, w.sp.supplyfd);
+    printf("%d\n", w.sp.pid);
     publishWordsToChild(w.sp.supplyfd, line);
     kill (w.sp.pid, SIGCONT);
 	}
@@ -109,7 +109,7 @@ static void waitForAllWorkers() {
   for (size_t i = 0; i < kNumCPUs; i++)
   {
     while (true)
-      pid_t pid = waitpid(-1, NULL, WUNTRACED|WNOHANG);
+      pid_t pid = waitpid(-1, NULL, WUNTRACED);
   }
 }
 
