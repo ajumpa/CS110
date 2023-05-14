@@ -37,20 +37,19 @@ static void markWorkersAsAvailable(int sig) {
   while (true)
   { 
     int status;
-    pid_t pid = waitpid(-1, &status, WUNTRACED);
-    if (pid <= 0 || WIFCONTINUED(status)) break;
+    pid_t pid = waitpid(-1, &status, WUNTRACED | WNOHANG);
+    if (pid <= 0 || WIFCONTINUED(status) ) break;
     workers[pid_workers_ix[pid]].available = true;
     numWorkersAvailable++;
-    break;
   }
 }
 
 static void spawnAllWorkers() {
-  static cpu_set_t cpu_set;
-  CPU_ZERO(&cpu_set);
   char *argv[] = {const_cast<char *>(kExecutable.c_str()), const_cast<char *>(kArg.c_str())};
   for (size_t i = 0; i < kNumCPUs; i++)
   {
+    cpu_set_t cpu_set;
+    CPU_ZERO(&cpu_set);
     worker w = worker(argv);
     workers[i] = w;
     pid_workers_ix.insert({w.sp.pid, i});
@@ -66,7 +65,7 @@ static void spawnAllWorkers() {
 static size_t getAvailableWorker() {
   sigset_t mask;
   sigemptyset(&mask);
-  while(numWorkersAvailable < 1)
+  while(!numWorkersAvailable)
     sigsuspend(&mask);
   
   for (size_t i = 0; i < kNumCPUs; i++)
@@ -97,24 +96,34 @@ static void broadcastNumbersToWorkers() {
 		long long num = stoll(line, &endpos);
 		if (endpos != line.size()) break;
     size_t i = getAvailableWorker();
-    worker w = workers[i];
-    printf("%d\n", w.sp.pid);
-    publishWordsToChild(w.sp.supplyfd, line);
-    kill (w.sp.pid, SIGCONT);
+    kill (workers[i].sp.pid, SIGCONT);
+    dprintf(workers[i].sp.supplyfd, "%lld\n", num);
 	}
 }
 
 static void waitForAllWorkers() {
-  printf("Waiting for all workers\n");
-  for (size_t i = 0; i < kNumCPUs; i++)
-  {
-    while (true)
-      pid_t pid = waitpid(-1, NULL, WUNTRACED);
-  }
+  sigset_t mask, mask_o;
+  sigemptyset(&mask_o);
+  sigaddset(&mask_o, SIGCHLD);
+  sigprocmask(SIG_BLOCK, &mask_o, &mask);
+  while(numWorkersAvailable < kNumCPUs)
+    sigsuspend(&mask);
+  sigprocmask(SIG_UNBLOCK, &mask_o, NULL);
 }
 
 static void closeAllWorkers() {
+  signal(SIGCHLD, SIG_DFL);
 
+  for (worker w : workers)
+  {
+    kill(w.sp.pid, SIGCONT);
+    close(w.sp.supplyfd);
+  }
+
+  for (worker w: workers)
+  {
+    waitpid(w.sp.pid, NULL, 0);
+  }
 }
 
 int main(int argc, char *argv[]) {
