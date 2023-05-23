@@ -15,7 +15,46 @@
 #include <sys/wait.h>
 using namespace std;
 
+// Built in functions
+static void forgroundBuiltIn(char* input);
+
+// Signal Handlers
+static void childStatusHandler(int sig);
+static void stopHandler(int sig);
+static void intHandler(int sig);
+
+// Control flow
+static void runJob(size_t jobNum, STSHJobState state);
+static size_t addToJobList(const vector<STSHProcess>& processes, STSHJobState state);
+static void createJob(const pipeline& p);
+static vector<STSHProcess> createProcesses(const pipeline& p);
+
 static STSHJobList joblist; // the one piece of global data we need so signal handlers can access it
+
+// TODO: Could add support so "fg " gets the last job created
+// TODO: Make this cleaner
+static void foregroundBuiltIn(char* input)
+{
+  size_t jobNum = 0;
+  if (!input)
+  {
+    
+  }
+  else if (isdigit(input[0])) 
+  {
+    jobNum = stoi(input);
+  }
+  if (joblist.containsJob(jobNum))
+  {
+    STSHJob& job = joblist.getJob(jobNum);
+    if (joblist.hasForegroundJob())
+      raise(SIGTSTP);
+    kill(job.getGroupID(), SIGCONT);
+    runJob(jobNum, kForeground);
+  }
+  else 
+    throw STSHException("fg: No such job");
+}
 
 /**
  *  * Function: handleBuiltin
@@ -35,17 +74,12 @@ static bool handleBuiltin(const pipeline& pipeline) {
   switch (index) {
     case 0:
     case 1: exit(0);
-    case 2: foreground();
+    case 2: foregroundBuiltIn(pipeline.commands[0].tokens[0]);
     case 7: cout << joblist; break;
     default: throw STSHException("Internal Error: Builtin command not supported."); // or not implemented yet
   }
 
   return true;
-}
-
-static void foreground()
-{
-
 }
 
 static void childStatusHandler(int sig)
@@ -64,37 +98,31 @@ static void childStatusHandler(int sig)
       if (WIFSTOPPED(status))
         process.setState(kStopped); 
       if (WIFCONTINUED(status))
+      {
         process.setState(kRunning);
+        cout << process.getID() << " is running" << endl;
+      }
       joblist.synchronize(job);
     }
   }
 }
 
-// TODO: HANDLE JOBS BEING BROUGHT BACK TO FOREGROUND
+// TODO: These could probably all be in one handler
 static void contHandler(int sig)
 {
-  
+
 }
 
 static void stopHandler(int sig)
 {
   if (joblist.hasForegroundJob())
-  {
-    STSHJob& job = joblist.getForegroundJob();
-    job.setState(kBackground);
-    kill(job.getGroupID(), SIGTSTP);
-    joblist.synchronize(job);
-  }
+    kill(joblist.getForegroundJob().getGroupID(), SIGTSTP);
 }
 
 static void intHandler(int sig)
 {
   if (joblist.hasForegroundJob())
-  {
-    STSHJob& job = joblist.getForegroundJob();
-    kill(job.getGroupID(), SIGKILL);
-    joblist.synchronize(job);
-  }
+    kill(joblist.getForegroundJob().getGroupID(), SIGKILL);
 }
 
 /**
@@ -113,14 +141,6 @@ static void installSignalHandlers() {
   signal(SIGINT, intHandler);
   signal(SIGTSTP, stopHandler);
   signal(SIGCONT, contHandler);
-}
-
-/* Add job to joblist with list of processes that are waiting to run
-*/
-static size_t addToJobList(const vector<STSHProcess>& processes, STSHJobState state) {
-  STSHJob& job = joblist.addJob(state);
-  for (const STSHProcess& process : processes) job.addProcess(process);
-  return job.getNum();
 }
 
 /**
@@ -150,25 +170,41 @@ static vector<STSHProcess> createProcesses(const pipeline& p)
   return jobProcesses;
 }
 
-static void syncJobList(size_t newJobNum)
+/**
+ * Add job to joblist with list of processes that are waiting to run
+ * TODO: Need to properly set process groupIDs for jobs with one or more processes
+ * TODO: Why "sleep n &" sets process to waiting and not running (it actually is running in background)
+*/
+static size_t addToJobList(vector<STSHProcess>& processes, STSHJobState state) 
 {
-  sigset_t mask, oldMask;
-  sigemptyset(&oldMask);
-  sigaddset(&oldMask, SIGCHLD);
-  sigprocmask(SIG_BLOCK, &oldMask, &mask);
-
-
-  // THIS IS WEIRD NEEDS TO BE DONE RIGHT
-  STSHJob& job = joblist.getJob(newJobNum);
-  while(job.getState() == kForeground)  
+  STSHJob& job = joblist.addJob(state);
+  for (STSHProcess& process : processes)
   {
-    sigsuspend(&mask);
-    STSHProcess& process = job.getProcesses().front();
+    job.addProcess(process);
     setpgid(process.getID(), 0);
-    process.setState(kRunning);
-    joblist.synchronize(job);
   }
-  sigprocmask(SIG_UNBLOCK, &oldMask, NULL);
+  kill(job.getGroupID(), SIGCONT);
+  return job.getNum();
+}
+
+// Run job until completed or stopped
+static void runJob(size_t jobNum, STSHJobState state)
+{
+  STSHJob& job = joblist.getJob(jobNum);
+  job.setState(state);
+  if (state == kForeground)
+  {
+    sigset_t mask, oldMask;
+    sigemptyset(&oldMask);
+    sigaddset(&oldMask, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &oldMask, &mask);
+
+    while(job.getState() == kForeground)  
+    {
+      sigsuspend(&mask);
+    }
+    sigprocmask(SIG_UNBLOCK, &oldMask, NULL);
+  }
 }
 
 /**
@@ -176,12 +212,12 @@ static void syncJobList(size_t newJobNum)
  *  * -------------------
  *  * Creates a new job on behalf of the provided pipeline.
  *  */
-static void createJob(const pipeline& p) {
+static void createJob(const pipeline& p)
+{
   vector<STSHProcess> jobProcesses = createProcesses(p);
-  //bool inForeground = !joblist.hasForegroundJob();
-  //enum STSHJobState newJobState = inForeground ? kForeground : kBackground;
-  size_t newJobNum = addToJobList(jobProcesses, kForeground);
-  syncJobList(newJobNum);
+  STSHJobState state = p.background ? kBackground : kForeground;
+  size_t newJobNum = addToJobList(jobProcesses, state);
+  runJob(newJobNum, state);
 }
 
 /**
