@@ -17,6 +17,8 @@ using namespace std;
 
 // Built in functions
 static void forgroundBuiltIn(char* input);
+static void backgroundBuiltIn(char* input);
+static void processBuiltIn(char* arg1, char* arg2, int sig);
 
 // Signal Handlers
 static void childStatusHandler(int sig);
@@ -27,33 +29,64 @@ static void intHandler(int sig);
 static void runJob(size_t jobNum, STSHJobState state);
 static size_t addToJobList(const vector<STSHProcess>& processes, STSHJobState state);
 static void createJob(const pipeline& p);
-static vector<STSHProcess> createProcesses(const pipeline& p);
+static void createProcesses(vector<STSHProcess>& jobProcesses, const pipeline& p);
+static void stsh_wait(STSHJob& job);
 
 static STSHJobList joblist; // the one piece of global data we need so signal handlers can access it
+
+bool isNumber(char *s)
+{
+  int i=0;
+  while(isdigit(s[i++]));
+  return (i=strlen(s));
+}
 
 // TODO: Could add support so "fg " gets the last job created
 // TODO: Make this cleaner
 static void foregroundBuiltIn(char* input)
 {
   size_t jobNum = 0;
-  if (!input)
-  {
-    
-  }
-  else if (isdigit(input[0])) 
-  {
-    jobNum = stoi(input);
-  }
+  if (input && isNumber(input)) jobNum = stoi(input);
+  
   if (joblist.containsJob(jobNum))
   {
-    STSHJob& job = joblist.getJob(jobNum);
     if (joblist.hasForegroundJob())
       raise(SIGTSTP);
-    kill(job.getGroupID(), SIGCONT);
+    kill(joblist.getJob(jobNum).getGroupID(), SIGCONT);
     runJob(jobNum, kForeground);
   }
   else 
     throw STSHException("fg: No such job");
+}
+static void backgroundBuiltIn(char* input)
+{
+  size_t jobNum = 0;
+  if (input && isNumber(input)) jobNum = stoi(input);
+  
+  if (joblist.containsJob(jobNum))
+    kill(joblist.getJob(jobNum).getGroupID(), SIGCONT);
+  else 
+    throw STSHException("fg: No such job");
+}
+
+// TODO: Doesn't work
+static void processBuiltIn(char *arg1, char *arg2, int sig)
+{
+  size_t num1 = NULL;
+  size_t num2 = NULL;
+
+  if (arg1 && isNumber(arg1)) num1 = stoi(arg1);
+  if (arg2 && isNumber(arg2)) num2 = stoi(arg2); 
+
+  if ((num1 && !num2) && joblist.containsProcess(num1)) kill(num1, sig);
+  else if(num1 && num2)
+  {
+    if (joblist.containsJob(num1) 
+          && joblist.getJob(num1).getProcesses().size() > num2 )
+      kill(joblist.getJob(num1).getProcesses()[num2].getID() ,sig);
+  }
+  else
+    throw STSHException("No such process");
 }
 
 /**
@@ -74,7 +107,11 @@ static bool handleBuiltin(const pipeline& pipeline) {
   switch (index) {
     case 0:
     case 1: exit(0);
-    case 2: foregroundBuiltIn(pipeline.commands[0].tokens[0]);
+    case 2: foregroundBuiltIn(pipeline.commands[0].tokens[0]); break;
+    case 3: backgroundBuiltIn(pipeline.commands[0].tokens[0]); break;
+    case 4: processBuiltIn(pipeline.commands[0].tokens[0], pipeline.commands[0].tokens[1], SIGKILL); break;
+    case 5: processBuiltIn(pipeline.commands[0].tokens[0], pipeline.commands[0].tokens[1], SIGTSTP); break;
+    case 6: processBuiltIn(pipeline.commands[0].tokens[0], pipeline.commands[0].tokens[1], SIGCONT); break;
     case 7: cout << joblist; break;
     default: throw STSHException("Internal Error: Builtin command not supported."); // or not implemented yet
   }
@@ -98,10 +135,7 @@ static void childStatusHandler(int sig)
       if (WIFSTOPPED(status))
         process.setState(kStopped); 
       if (WIFCONTINUED(status))
-      {
         process.setState(kRunning);
-        cout << process.getID() << " is running" << endl;
-      }
       joblist.synchronize(job);
     }
   }
@@ -146,9 +180,8 @@ static void installSignalHandlers() {
 /**
  * Create a list of processes from a parsed command
 */
-static vector<STSHProcess> createProcesses(const pipeline& p)
+static void createProcesses(vector<STSHProcess>& jobProcesses, const pipeline& p)
 {
-  vector<STSHProcess> jobProcesses;
   for (size_t i = 0; i < p.commands.size(); i++)
   {
     char *argv[kMaxArguments + 2];
@@ -163,37 +196,31 @@ static vector<STSHProcess> createProcesses(const pipeline& p)
     if (pid == 0)
     {
      execvp(argv[0], argv);
+     throw STSHException(strcat(argv[0],": command not found"));
     }
     STSHProcess process = STSHProcess(pid, p.commands[i], kWaiting);
     jobProcesses.push_back(process);
   }
-  return jobProcesses;
 }
 
 /**
  * Add job to joblist with list of processes that are waiting to run
  * TODO: Need to properly set process groupIDs for jobs with one or more processes
- * TODO: Why "sleep n &" sets process to waiting and not running (it actually is running in background)
 */
 static size_t addToJobList(vector<STSHProcess>& processes, STSHJobState state) 
 {
   STSHJob& job = joblist.addJob(state);
+  pid_t groupPID = processes.front().getID();
   for (STSHProcess& process : processes)
   {
     job.addProcess(process);
-    setpgid(process.getID(), 0);
+    setpgid(groupPID, 0);
   }
-  kill(job.getGroupID(), SIGCONT);
   return job.getNum();
 }
 
-// Run job until completed or stopped
-static void runJob(size_t jobNum, STSHJobState state)
+static void stsh_wait(STSHJob& job)
 {
-  STSHJob& job = joblist.getJob(jobNum);
-  job.setState(state);
-  if (state == kForeground)
-  {
     sigset_t mask, oldMask;
     sigemptyset(&oldMask);
     sigaddset(&oldMask, SIGCHLD);
@@ -204,7 +231,16 @@ static void runJob(size_t jobNum, STSHJobState state)
       sigsuspend(&mask);
     }
     sigprocmask(SIG_UNBLOCK, &oldMask, NULL);
-  }
+}
+
+// Run job until completed or stopped
+static void runJob(size_t jobNum, STSHJobState state)
+{
+  STSHJob& job = joblist.getJob(jobNum);
+  job.setState(state);
+  for (STSHProcess& process : job.getProcesses()) 
+    process.setState(kRunning);
+  stsh_wait(job);
 }
 
 /**
@@ -214,7 +250,8 @@ static void runJob(size_t jobNum, STSHJobState state)
  *  */
 static void createJob(const pipeline& p)
 {
-  vector<STSHProcess> jobProcesses = createProcesses(p);
+  vector<STSHProcess> jobProcesses;
+  createProcesses(jobProcesses, p);
   STSHJobState state = p.background ? kBackground : kForeground;
   size_t newJobNum = addToJobList(jobProcesses, state);
   runJob(newJobNum, state);
