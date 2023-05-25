@@ -52,7 +52,7 @@ static void foregroundBuiltIn(char* input)
   {
     if (joblist.hasForegroundJob())
       raise(SIGTSTP);
-    kill(joblist.getJob(jobNum).getGroupID(), SIGCONT);
+    kill(-joblist.getJob(jobNum).getGroupID(), SIGCONT);
     runJob(jobNum, kForeground);
   }
   else 
@@ -64,7 +64,7 @@ static void backgroundBuiltIn(char* input)
   if (input && isNumber(input)) jobNum = stoi(input);
   
   if (joblist.containsJob(jobNum))
-    kill(joblist.getJob(jobNum).getGroupID(), SIGCONT);
+    kill(-joblist.getJob(jobNum).getGroupID(), SIGCONT);
   else 
     throw STSHException("fg: No such job");
 }
@@ -143,7 +143,6 @@ static void childStatusHandler(int sig)
   }
 }
 
-// TODO: These could probably all be in one handler
 static void contHandler(int sig)
 {
 
@@ -152,13 +151,13 @@ static void contHandler(int sig)
 static void stopHandler(int sig)
 {
   if (joblist.hasForegroundJob())
-    kill(joblist.getForegroundJob().getGroupID(), SIGTSTP);
+    kill(-joblist.getForegroundJob().getGroupID(), SIGTSTP);
 }
 
 static void intHandler(int sig)
 {
   if (joblist.hasForegroundJob())
-    kill(joblist.getForegroundJob().getGroupID(), SIGKILL);
+    kill(-joblist.getForegroundJob().getGroupID(), SIGKILL);
 }
 
 /**
@@ -179,44 +178,81 @@ static void installSignalHandlers() {
   signal(SIGCONT, contHandler);
 }
 
+static void writePipe(int write[2])
+{
+  if (close(write[0]) < 0)
+    perror("close");
+  if (dup2(write[1], STDOUT_FILENO) < 0)
+    perror("dup2");
+}
+
+static void readFromPipe(int read[2])
+{
+  if (close(read[1]) < 0)
+    perror("close");
+  if (dup2(read[0], STDIN_FILENO) < 0)
+    perror("dup2");
+}
+
 /**
  * Create a list of processes from a parsed command
 */
 static void createProcesses(vector<STSHProcess>& jobProcesses, const pipeline& p)
 {
+  size_t nPipes = p.commands.size()-1;
+  int fds[nPipes][2];
+  pid_t groupPID;
+
   for (size_t i = 0; i < p.commands.size(); i++)
   {
     char *argv[kMaxArguments + 2];
     argv[0] = (char *) p.commands[i].command;
     
-    size_t j;
-    for (j = 0; j <= kMaxArguments || p.commands[i].tokens[j] == NULL; j++) {
+    size_t j = 0;
+    while(p.commands[i].tokens[j])
+    {
       argv[j+1] = p.commands[i].tokens[j];
+      j++;
     }
+    argv[j+1] = NULL;
 
+    if (nPipes && i < nPipes) pipe(fds[i]);
     pid_t pid = fork();
     if (pid == 0)
     {
-     execvp(argv[0], argv);
-     throw STSHException(strcat(argv[0],": command not found"));
+      if (nPipes)
+      {
+        if (i < nPipes)
+          writePipe(fds[i]);
+        if (i > 0)
+          readFromPipe(fds[i-1]);
+      }
+
+      execvp(argv[0], argv);
+      throw STSHException(strcat(argv[0],": command not found"));
     }
+    if (i == 0) groupPID = pid;
+    setpgid(pid, groupPID);
     STSHProcess process = STSHProcess(pid, p.commands[i], kWaiting);
     jobProcesses.push_back(process);
+  }
+
+  for (size_t i = 0; i < nPipes; i++)
+  {
+    close(fds[i][0]);
+    close(fds[i][1]);
   }
 }
 
 /**
  * Add job to joblist with list of processes that are waiting to run
- * TODO: Need to properly set process groupIDs for jobs with one or more processes, I think this is it
 */
 static size_t addToJobList(vector<STSHProcess>& processes, STSHJobState state) 
 {
   STSHJob& job = joblist.addJob(state);
-  pid_t groupPID = processes.front().getID();
   for (STSHProcess& process : processes)
   {
     job.addProcess(process);
-    setpgid(groupPID, 0);
   }
   return job.getNum();
 }
@@ -242,7 +278,9 @@ static void runJob(size_t jobNum, STSHJobState state)
   job.setState(state);
   for (STSHProcess& process : job.getProcesses()) 
     process.setState(kRunning);
+  bool termCtr = (tcsetpgrp(STDIN_FILENO, job.getGroupID()) == 0) ? true : false;
   stsh_wait(job);
+  if (termCtr) tcsetpgrp(STDIN_FILENO, getpid());
 }
 
 /**
