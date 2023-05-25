@@ -69,7 +69,6 @@ static void backgroundBuiltIn(char* input)
     throw STSHException("fg: No such job");
 }
 
-// TODO: Doesn't work
 static void processBuiltIn(char *arg1, char *arg2, int sig)
 {
   size_t num1 = NULL;
@@ -78,12 +77,15 @@ static void processBuiltIn(char *arg1, char *arg2, int sig)
   if (arg1 && isNumber(arg1)) num1 = stoi(arg1);
   if (arg2 && isNumber(arg2)) num2 = stoi(arg2); 
 
-  if ((num1 && !num2) && joblist.containsProcess(num1)) kill(num1, sig);
-  else if(num1 && num2)
+  if ((num1 && !num2) && joblist.containsProcess(num1))
+    kill(num1, sig);
+  else if(num1 > 0 && num2 >=0)
   {
     if (joblist.containsJob(num1) 
           && joblist.getJob(num1).getProcesses().size() > num2 )
       kill(joblist.getJob(num1).getProcesses()[num2].getID() ,sig);
+    else
+      throw STSHException("No such process");
   }
   else
     throw STSHException("No such process");
@@ -205,7 +207,7 @@ static void createProcesses(vector<STSHProcess>& jobProcesses, const pipeline& p
 
 /**
  * Add job to joblist with list of processes that are waiting to run
- * TODO: Need to properly set process groupIDs for jobs with one or more processes
+ * TODO: Need to properly set process groupIDs for jobs with one or more processes, I think this is it
 */
 static size_t addToJobList(vector<STSHProcess>& processes, STSHJobState state) 
 {
