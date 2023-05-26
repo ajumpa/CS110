@@ -178,6 +178,14 @@ static void installSignalHandlers() {
   signal(SIGCONT, contHandler);
 }
 
+static void readPipe(int read[2])
+{
+  if (close(read[1]) < 0)
+    perror("close");
+  if (dup2(read[0], STDIN_FILENO) < 0)
+    perror("dup2");
+}
+
 static void writePipe(int write[2])
 {
   if (close(write[0]) < 0)
@@ -186,24 +194,17 @@ static void writePipe(int write[2])
     perror("dup2");
 }
 
-static void readFromPipe(int read[2])
-{
-  if (close(read[1]) < 0)
-    perror("close");
-  if (dup2(read[0], STDIN_FILENO) < 0)
-    perror("dup2");
-}
-
 /**
  * Create a list of processes from a parsed command
 */
 static void createProcesses(vector<STSHProcess>& jobProcesses, const pipeline& p)
 {
-  size_t nPipes = p.commands.size()-1;
+  int nCommands = p.commands.size();
+  size_t nPipes = nCommands-1;
   int fds[nPipes][2];
   pid_t groupPID;
 
-  for (size_t i = 0; i < p.commands.size(); i++)
+  for (size_t i = 0; i < nCommands; i++)
   {
     char *argv[kMaxArguments + 2];
     argv[0] = (char *) p.commands[i].command;
@@ -216,21 +217,18 @@ static void createProcesses(vector<STSHProcess>& jobProcesses, const pipeline& p
     }
     argv[j+1] = NULL;
 
-    if (nPipes && i < nPipes) pipe(fds[i]);
+    // TODO: echo 12345 | ./conduit --delay 1 | ./conduit | ./conduit doesn't get past first "conduit"
+    if (i < nPipes) pipe(fds[i]);
     pid_t pid = fork();
     if (pid == 0)
     {
-      if (nPipes)
-      {
-        if (i < nPipes)
-          writePipe(fds[i]);
-        if (i > 0)
-          readFromPipe(fds[i-1]);
-      }
+      if (i > 0) readPipe(fds[i-1]);
+      if (i < nPipes) writePipe(fds[i]);
 
       execvp(argv[0], argv);
       throw STSHException(strcat(argv[0],": command not found"));
     }
+
     if (i == 0) groupPID = pid;
     setpgid(pid, groupPID);
     STSHProcess process = STSHProcess(pid, p.commands[i], kWaiting);
@@ -239,8 +237,8 @@ static void createProcesses(vector<STSHProcess>& jobProcesses, const pipeline& p
 
   for (size_t i = 0; i < nPipes; i++)
   {
-    close(fds[i][0]);
-    close(fds[i][1]);
+    if (close(fds[i][0]) < 0) perror("close");
+    if (close(fds[i][1]) < 0) perror("close");
   }
 }
 
@@ -264,11 +262,13 @@ static void stsh_wait(STSHJob& job)
     sigaddset(&oldMask, SIGCHLD);
     sigprocmask(SIG_BLOCK, &oldMask, &mask);
 
+    bool termCtr = (tcsetpgrp(STDIN_FILENO, job.getGroupID()) == 0) ? true : false;
     while(job.getState() == kForeground)  
     {
       sigsuspend(&mask);
     }
     sigprocmask(SIG_UNBLOCK, &oldMask, NULL);
+    if (termCtr) tcsetpgrp(STDIN_FILENO, getpid());
 }
 
 // Run job until completed or stopped
@@ -278,9 +278,7 @@ static void runJob(size_t jobNum, STSHJobState state)
   job.setState(state);
   for (STSHProcess& process : job.getProcesses()) 
     process.setState(kRunning);
-  bool termCtr = (tcsetpgrp(STDIN_FILENO, job.getGroupID()) == 0) ? true : false;
   stsh_wait(job);
-  if (termCtr) tcsetpgrp(STDIN_FILENO, getpid());
 }
 
 /**
