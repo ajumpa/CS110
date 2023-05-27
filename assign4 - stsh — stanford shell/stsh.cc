@@ -199,10 +199,11 @@ static void writePipe(int write[2])
 */
 static void createProcesses(vector<STSHProcess>& jobProcesses, const pipeline& p)
 {
-  int nCommands = p.commands.size();
+  size_t nCommands = p.commands.size();
   size_t nPipes = nCommands-1;
   int fds[nPipes][2];
-  pid_t groupPID;
+  pid_t pgid = 0;
+  pid_t pid;
 
   for (size_t i = 0; i < nCommands; i++)
   {
@@ -210,18 +211,13 @@ static void createProcesses(vector<STSHProcess>& jobProcesses, const pipeline& p
     argv[0] = (char *) p.commands[i].command;
     
     size_t j = 0;
-    while(p.commands[i].tokens[j])
-    {
-      argv[j+1] = p.commands[i].tokens[j];
-      j++;
-    }
+    while((argv[j+1] = p.commands[i].tokens[j])) j++;
     argv[j+1] = NULL;
 
-    // TODO: echo 12345 | ./conduit --delay 1 | ./conduit | ./conduit doesn't get past first "conduit"
     if (i < nPipes) pipe(fds[i]);
-    pid_t pid = fork();
-    if (pid == 0)
+    if ( (pid = fork()) == 0)
     {
+      setpgid(0, pgid);
       if (i > 0) readPipe(fds[i-1]);
       if (i < nPipes) writePipe(fds[i]);
 
@@ -229,16 +225,13 @@ static void createProcesses(vector<STSHProcess>& jobProcesses, const pipeline& p
       throw STSHException(strcat(argv[0],": command not found"));
     }
 
-    if (i == 0) groupPID = pid;
-    setpgid(pid, groupPID);
+    if (i > 0 && close(fds[i-1][1]) < 0) perror("close");
+
+    if (i == 0) pgid = pid;
+    setpgid(pid, pgid);
+
     STSHProcess process = STSHProcess(pid, p.commands[i], kWaiting);
     jobProcesses.push_back(process);
-  }
-
-  for (size_t i = 0; i < nPipes; i++)
-  {
-    if (close(fds[i][0]) < 0) perror("close");
-    if (close(fds[i][1]) < 0) perror("close");
   }
 }
 
@@ -249,9 +242,7 @@ static size_t addToJobList(vector<STSHProcess>& processes, STSHJobState state)
 {
   STSHJob& job = joblist.addJob(state);
   for (STSHProcess& process : processes)
-  {
     job.addProcess(process);
-  }
   return job.getNum();
 }
 
