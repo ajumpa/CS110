@@ -194,6 +194,20 @@ static void writePipe(int write[2])
     perror("dup2");
 }
 
+#define BUFFERSIZE 1024
+static void redirect(const char* file, int redirect)
+{
+  int flags = 0;
+  if (redirect == STDIN_FILENO) flags = O_RDONLY;
+  if (redirect == STDOUT_FILENO) flags = O_CREAT|O_WRONLY|O_TRUNC;
+  int fd = open(file, flags, 0644);
+  if (fd < 0) perror("open");
+
+  if (dup2(fd, redirect) < 0) perror("dup2");
+
+  if (close(fd) < 0) perror("close");
+}
+
 /**
  * Create a list of processes from a parsed command
 */
@@ -204,6 +218,11 @@ static void createProcesses(vector<STSHProcess>& jobProcesses, const pipeline& p
   int fds[nPipes][2];
   pid_t pgid = 0;
   pid_t pid;
+  const char* outfile = NULL;
+  const char* infile = NULL;
+
+  if (p.output != "") outfile = p.output.c_str();
+  if (p.input != "") infile = p.input.c_str();
 
   for (size_t i = 0; i < nCommands; i++)
   {
@@ -220,6 +239,9 @@ static void createProcesses(vector<STSHProcess>& jobProcesses, const pipeline& p
       setpgid(0, pgid);
       if (i > 0) readPipe(fds[i-1]);
       if (i < nPipes) writePipe(fds[i]);
+
+      if (i == 0 && infile) redirect(infile, STDIN_FILENO);
+      if (i == nCommands-1 && outfile) redirect(outfile, STDOUT_FILENO);
 
       execvp(argv[0], argv);
       throw STSHException(strcat(argv[0],": command not found"));
