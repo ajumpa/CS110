@@ -194,7 +194,6 @@ static void writePipe(int write[2])
     perror("dup2");
 }
 
-#define BUFFERSIZE 1024
 static void redirect(const char* file, int redirect)
 {
   int flags = 0;
