@@ -11,7 +11,7 @@
 #include <libxml/parser.h>
 #include <libxml/catalog.h>
 #include <ostream>
-
+#include <thread>
 
 #include "rss-feed.h"
 #include "rss-feed-list.h"
@@ -22,6 +22,8 @@
 #include "utils.h"
 #include "string-utils.h"
 #include "ostreamlock.h"
+#include "semaphore.h"
+
 using namespace std;
 
 /**
@@ -134,7 +136,16 @@ void NewsAggregator::queryIndex() const {
  * of the class definition.
  */
 NewsAggregator::NewsAggregator(const string& rssFeedListURI, bool verbose): 
-  log(verbose), rssFeedListURI(rssFeedListURI), built(false) {}
+  log(verbose), rssFeedListURI(rssFeedListURI), built(false) 
+{
+
+}
+
+static void feedThread(size_t tid, semaphore &s, const string feedUrl, const string feedName)
+{
+  s.signal(on_thread_exit);
+  cout << oslock << "Thread " << tid << " looking up <" << feedUrl << " , " << feedName << endl << osunlock; 
+}
 
 /**
  * Private Method: processAllFeeds
@@ -143,9 +154,38 @@ NewsAggregator::NewsAggregator(const string& rssFeedListURI, bool verbose):
  * leads to RSSFeeds, which themsleves lead to HTMLDocuemnts, which
  * can be collectively parsed for their tokens to build a huge RSSIndex.
  * 
- * The vast majority of your Assignment 5 work has you implement this
- * method using multithreading while respecting the imposed constraints
- * outlined in the spec.
  */
 
-void NewsAggregator::processAllFeeds() {}
+#define MAX_FEED_THREADS 8
+#define MAX_THREADS_TO_SERVER 10
+#define MAX_EXECUTING_THREADS 24
+
+/*Article a = {"Hello.there.com", "Hello There"};
+vector<string> s = {"Hello", "There"};
+index.add(a, s);
+const vector<pair<Article, int> >& matches = index.getMatchingArticles("Hello");
+cout << matches.size() << endl;*/
+void NewsAggregator::processAllFeeds() 
+{
+  RSSFeedList rssFeedList(rssFeedListURI);
+  rssFeedList.parse();
+  const map<std::string, std::string>& feeds = rssFeedList.getFeeds();
+
+  vector<thread> threads;
+  semaphore permits(MAX_FEED_THREADS);
+  size_t tid = 0;
+  for (auto const &feed : feeds)
+  {
+    permits.wait();
+    tid++;
+    const string feedUrl = feed.first;
+    const string feedName = feed.second;
+
+    threads.push_back(thread([this](size_t tid, semaphore& s, const string feedUrl, const string feedName) {
+        feedThread(tid, s, feedUrl, feedName);
+    }, tid, ref(permits), feedUrl, feedName));
+
+  }
+
+  for (thread& t: threads) t.join();
+}

@@ -12,6 +12,8 @@ NA_LIB_SRC = news-aggregator.cc \
 	     rss-feed.cc \
 	     rss-feed-list.cc \
 	     html-document.cc \
+			 ostreamlock.cc \
+			 semaphore.cc \
 	     rss-index.cc 
 
 WARNINGS = -Wall -pedantic
