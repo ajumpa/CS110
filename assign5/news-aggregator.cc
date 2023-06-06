@@ -22,9 +22,12 @@
 #include "utils.h"
 #include "string-utils.h"
 #include "ostreamlock.h"
-#include "semaphore.h"
 
 using namespace std;
+
+#define MAX_FEED_THREADS 8
+#define MAX_THREADS_TO_LINK 10
+#define MAX_EXECUTING_DOWNLOAD_THREADS 24
 
 /**
  * Factory Method: createNewsAggregator
@@ -141,10 +144,75 @@ NewsAggregator::NewsAggregator(const string& rssFeedListURI, bool verbose):
 
 }
 
-static void feedThread(size_t tid, semaphore &s, const string feedUrl, const string feedName)
+const string& NewsAggregator::waitlink(const string& link)
+{
+  mapLock.lock();
+  semaphore* up;
+  auto linksem = linkLocks.find(link);
+  if (linksem == linkLocks.end())
+  {
+    semaphore *s = new semaphore(MAX_THREADS_TO_LINK);
+    linkLocks.insert({link, s});
+    up = s;
+  } else {
+    up = linksem->second;
+  }
+  mapLock.unlock();
+  up->wait();
+  return link;
+}
+
+const string& NewsAggregator::signallink(const string& link)
+{
+  semaphore *up;
+  mapLock.lock();
+  auto linksem = linkLocks.find(link);
+  mapLock.unlock();
+  up = linksem->second;
+  up->signal(on_thread_exit);
+  return link;
+}
+
+void NewsAggregator::processArticle(size_t tid, semaphore &s, const string feedUrl, const string articleUrl, const string articleTitle)
+{
+  waitlink(trim(feedUrl));
+  s.signal(on_thread_exit);
+
+  //cout << oslock << "Article thread " << tid << " looking up <" << articleUrl << " , " << articleTitle << endl << osunlock; 
+
+  signallink(trim(feedUrl));
+}
+
+void NewsAggregator::processFeed(size_t tid, semaphore &s, const string feedUrl, const string feedName)
 {
   s.signal(on_thread_exit);
-  cout << oslock << "Thread " << tid << " looking up <" << feedUrl << " , " << feedName << endl << osunlock; 
+  //cout << oslock << "Thread " << tid << " looking up <" << feedUrl << " , " << feedName << endl << osunlock; 
+
+  RSSFeed rssFeed(feedUrl);
+
+  try {
+    rssFeed.parse();
+  } catch (RSSFeedException e) {
+    log.noteSingleFeedDownloadFailure(feedUrl);
+    return;
+  }
+
+  const vector<Article>& articles = rssFeed.getArticles();
+  vector<thread> threads;
+  semaphore permits(MAX_EXECUTING_DOWNLOAD_THREADS);
+
+  for (auto const &article : articles)
+  {
+    permits.wait();
+    const string articleUrl = article.url;
+    const string articleTitle = article.title;
+
+    threads.push_back(thread([this](size_t tid, semaphore& s, const string feedUrl, const string articleUrl, const string articleTitle) {
+        processArticle(rand(), s, feedUrl, articleUrl, articleTitle);
+    }, tid, ref(permits), feedUrl, articleUrl, articleTitle));
+
+  }
+  for (thread& t: threads) t.join();
 }
 
 /**
@@ -155,20 +223,16 @@ static void feedThread(size_t tid, semaphore &s, const string feedUrl, const str
  * can be collectively parsed for their tokens to build a huge RSSIndex.
  * 
  */
-
-#define MAX_FEED_THREADS 8
-#define MAX_THREADS_TO_SERVER 10
-#define MAX_EXECUTING_THREADS 24
-
-/*Article a = {"Hello.there.com", "Hello There"};
-vector<string> s = {"Hello", "There"};
-index.add(a, s);
-const vector<pair<Article, int> >& matches = index.getMatchingArticles("Hello");
-cout << matches.size() << endl;*/
 void NewsAggregator::processAllFeeds() 
 {
   RSSFeedList rssFeedList(rssFeedListURI);
-  rssFeedList.parse();
+
+  try {
+    rssFeedList.parse();
+  } catch (RSSFeedListException e) {
+    log.noteFullRSSFeedListDownloadFailureAndExit(rssFeedListURI);
+  }
+
   const map<std::string, std::string>& feeds = rssFeedList.getFeeds();
 
   vector<thread> threads;
@@ -182,9 +246,8 @@ void NewsAggregator::processAllFeeds()
     const string feedName = feed.second;
 
     threads.push_back(thread([this](size_t tid, semaphore& s, const string feedUrl, const string feedName) {
-        feedThread(tid, s, feedUrl, feedName);
+        processFeed(tid, s, feedUrl, feedName);
     }, tid, ref(permits), feedUrl, feedName));
-
   }
 
   for (thread& t: threads) t.join();
