@@ -173,14 +173,26 @@ const string& NewsAggregator::signallink(const string& link)
   return link;
 }
 
-void NewsAggregator::processArticle(size_t tid, semaphore &s, const string feedUrl, const string articleUrl, const string articleTitle)
+void NewsAggregator::processArticle(size_t tid, semaphore &s, const string feedUrl, const Article& article)
 {
-  waitlink(trim(feedUrl));
+  waitlink(getURLServer(feedUrl));
   s.signal(on_thread_exit);
 
-  //cout << oslock << "Article thread " << tid << " looking up <" << articleUrl << " , " << articleTitle << endl << osunlock; 
+  //cout << oslock << "Article thread " << tid << " looking up <" << article.url << " , " << article.title << endl << osunlock; 
 
-  signallink(trim(feedUrl));
+  HTMLDocument document(article.url);
+  try {
+    document.parse();
+  } catch (HTMLDocumentException e) {
+    log.noteSingleArticleDownloadFailure(article);
+    return;
+  }
+
+  indexLock.lock();
+  index.add(article, document.getTokens());
+  indexLock.unlock();   
+
+  signallink(getURLServer(feedUrl));
 }
 
 void NewsAggregator::processFeed(size_t tid, semaphore &s, const string feedUrl, const string feedName)
@@ -204,12 +216,10 @@ void NewsAggregator::processFeed(size_t tid, semaphore &s, const string feedUrl,
   for (auto const &article : articles)
   {
     permits.wait();
-    const string articleUrl = article.url;
-    const string articleTitle = article.title;
 
-    threads.push_back(thread([this](size_t tid, semaphore& s, const string feedUrl, const string articleUrl, const string articleTitle) {
-        processArticle(rand(), s, feedUrl, articleUrl, articleTitle);
-    }, tid, ref(permits), feedUrl, articleUrl, articleTitle));
+    threads.push_back(thread([this](size_t tid, semaphore& s, const string feedUrl, const Article& article) {
+        processArticle(rand(), s, feedUrl, article);
+    }, tid, ref(permits), feedUrl, ref(article)));
 
   }
   for (thread& t: threads) t.join();

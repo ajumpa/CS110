@@ -63,6 +63,8 @@ class NewsAggregator {
   RSSIndex index;
   bool built;
 
+  std::mutex indexLock;
+
 
 /**
  * Constructor: NewsAggregator
@@ -88,7 +90,7 @@ class NewsAggregator {
   /**
    * Download a single article in a thread.
   */
-  void processArticle(size_t tid, semaphore &s, const std::string feedUrl, const std::string articleUrl, const std::string articleName);
+  void processArticle(size_t tid, semaphore &s, const std::string feedUrl, const Article& article);
   /**
    * Download a single feed in a thread. Each thread will spawn another thread
    * for each article that is identified in the feed.
