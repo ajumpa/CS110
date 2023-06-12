@@ -2,7 +2,7 @@
 
 PROGS = aggregate tptest
 EXTRA_PROGS = tpcustomtest
-CXX = /usr/bin/g++-5
+CXX = /usr/bin/g++
 
 NA_LIB_SRC = news-aggregator.cc \
 	     log.cc \
